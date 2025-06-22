@@ -95,26 +95,6 @@ int main(int argc, const char* argv[]) {
     cout << "Base de datos abierta correctamente" << endl;
 
 
-
- cout << "\n[DEBUG] Verificando soporte nativo de FTS5..." << endl;
-if (sqlite3_compileoption_used("ENABLE_FTS5")) {
-    cout << "[DEBUG] FTS5 está disponible NATIVAMENTE en esta versión de SQLite." << endl;
-} else {
-    cout << "[DEBUG] FTS5 NO está disponible nativamente. Intentando cargarlo manualmente..." << endl;
-    
-    // --- Forzar carga de FTS5 ---
-    sqlite3_enable_load_extension(db, 1);
-    if (sqlite3_exec(db, "SELECT load_extension('fts5');", NULL, NULL, &errMsg) == SQLITE_OK) {
-        cout << "[DEBUG] ¡FTS5 se cargó MANUALMENTE con éxito!" << endl;
-    } else {
-        cout << "[DEBUG] Error al cargar FTS5 manualmente: " << errMsg << endl;
-        sqlite3_free(errMsg);
-        sqlite3_close(db);
-        return 1;
-    }
-}
-
-    
     // Step 4: Crear tabla virtual FTS5
     cout << "Creando tabla FTS5..." << endl;
     if (sqlite3_exec(db, "CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(path, content, tokenize='unicode61');",
