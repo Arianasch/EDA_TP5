@@ -104,7 +104,7 @@ int main(int argc, const char* argv[]) {
         sqlite3_close(db);
         return 1;
     }
-
+ cout << "FTS5 CARGADO" << endl;
     
     // Step 4: Crear tabla virtual FTS5
     cout << "Creando tabla FTS5..." << endl;
