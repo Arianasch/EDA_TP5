@@ -94,6 +94,18 @@ int main(int argc, const char* argv[]) {
     }
     cout << "Base de datos abierta correctamente" << endl;
 
+
+
+    // 1. Habilitar extensiones y cargar FTS5 (después de abrir la BD)
+    sqlite3_enable_load_extension(db, 1);  // Habilita extensiones
+    if (sqlite3_exec(db, "SELECT load_extension('fts5');", NULL, NULL, &errMsg) != SQLITE_OK) {
+        cout << "Error al cargar FTS5: " << errMsg << endl;
+        sqlite3_free(errMsg);
+        sqlite3_close(db);
+        return 1;
+    }
+
+    
     // Step 4: Crear tabla virtual FTS5
     cout << "Creando tabla FTS5..." << endl;
     if (sqlite3_exec(db, "CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(path, content, tokenize='unicode61');",
