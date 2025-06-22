@@ -79,4 +79,10 @@ Ignora palabras cortas (< 3 caracteres).
 Las guarda en un set<string> para evitar duplicados.
 
 
-6)
+##BUSCADOR
+En la parte del buscador, lo primero que se hace es tokenizar la búsqueda del usuario. esto es, se separa todo el string de búsqueda en palabras individuales. Si el usuario buscó "100 metros", guardaremos "100" y "metros". 
+
+luego de esto, se hace un query a la base de datos creada por mkindex, llamada index.db. Lo que nuestro código busca, son coincidencias (al menos una vez) por cada palabra tokenizada. si se hizo la búsqueda con "100 metros", nuestro código de fondo buscará todos los documentos que tengan una coincidencia para "100" y otra para "metros". SQlite nos devolverá todos los paths de los archivos donde se cumplieron las condiciones, y nuestro frontend podrá presentarlos al usuario como hipervínculos que llevan al archivo. Estos paths se devuelven por medio de un vector, para contenerlos y poder trabajarlos todos juntos. 
+Como el archivo está en formato HTML, se puede visualizar por medio del mismo navegador web del que se accede al servidor autohosteado. No solo tenemos nuestro propio google, sino que tenemos también nuestro propio visualizador de HTML y servidor con archivos. Tenemos casi nuestro propio internet! (a muy baja escala, muy limitado, y extremadamente básico, pero nuestro)
+
+Algo que no fue implementado fue algún tipo de ordenamiento de resultados. De momento, el código devuelve todos los hits sin dar ningún orden o comportamiento definido. queda en manos de SQL y cómo decide devolver el vector de resultados. Como mejora a futuro, se podría implementar un algoritmo que dé mayor peso a palabras clave si están en el titulo del documento, o que ordene por repetición de palabras (esto es, si un documento tiene la palabra buscada 20 veces, probablemente sea más relevante que otro documento donde la palabra buscadda aparece una sola vez. por tanto, deberíamos presentarle al usuario primero los documentos con más hits.)
