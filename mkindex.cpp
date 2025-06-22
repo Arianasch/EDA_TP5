@@ -7,19 +7,20 @@
  * @copyright Copyright (c) 2022-2024 Marc S. Ressl
  */
 #include <iostream>
-#include <string>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <algorithm>
 #include <set>
+#include <string>
+#include <sstream>
+#include <fstream>
+#include <filesystem>
 #include <sqlite3.h>
-#include "CommandLineParser.h"
+#include <cctype>
+#include <algorithm>
+#include <regex>
 
 using namespace std;
 
-// Callback for debugging database entries
-static int onDatabaseEntry(void *userdata, int argc, char **argv, char **azColName) {
+// Callback para mostrar entradas de la base de datos (opcional, para depuración)
+static int onDatabaseEntry(void* userdata, int argc, char** argv, char** azColName) {
     cout << "--- Entry" << endl;
     for (int i = 0; i < argc; i++) {
         cout << azColName[i] << ": " << (argv[i] ? argv[i] : "NULL") << endl;
@@ -27,92 +28,97 @@ static int onDatabaseEntry(void *userdata, int argc, char **argv, char **azColNa
     return 0;
 }
 
-// Extract words from HTML content
-set<string> extractWords(const string& content) {
-    set<string> words;
-    string cleanText;
-    bool inTag = false;
-
-    // Remove HTML tags
-    for (char c : content) {
-        if (c == '<') inTag = true;
-        else if (c == '>') inTag = false;
-        else if (!inTag) cleanText += c;
+// Clase simulada para CommandLineParser (ajustá según tu implementación real)
+class CommandLineParser {
+    int argc;
+    const char** argv;
+public:
+    CommandLineParser(int c, const char* v[]) : argc(c), argv(v) {}
+    bool hasOption(const string& opt) {
+        for (int i = 1; i < argc; ++i) {
+            if (string(argv[i]) == opt) return true;
+        }
+        return false;
     }
-
-    // Extract words
-    stringstream ss(cleanText);
-    string word;
-    while (ss >> word) {
-        transform(word.begin(), word.end(), word.begin(), ::tolower);
-        word.erase(remove_if(word.begin(), word.end(), ::ispunct), word.end());
-        if (word.length() >= 3) words.insert(word);
+    string getOption(const string& opt) {
+        for (int i = 1; i < argc; ++i) {
+            if (string(argv[i]) == opt && i + 1 < argc) {
+                return string(argv[i + 1]);
+            }
+        }
+        return "";
     }
-    return words;
+};
+
+// Extraer texto limpio de contenido HTML (modificado para FTS5)
+
+std::string extractCleanText(const std::string& content) {
+    // Quitar etiquetas HTML, comentarios y scripts
+    std::string clean = std::regex_replace(content, std::regex("<!--.*?-->|<script.*?</script>|</?[^>]+>", std::regex::icase), "");
+
+    // Convertir a minúsculas
+    std::transform(clean.begin(), clean.end(), clean.begin(), ::tolower);
+
+    // Quitar puntuación y normalizar espacios
+    clean = std::regex_replace(clean, std::regex("[^a-z\\s]+"), "");
+    clean = std::regex_replace(clean, std::regex("\\s+"), " ");
+
+    // Quitar espacios iniciales o finales
+    clean = std::regex_replace(clean, std::regex("^\\s+|\\s+$"), "");
+
+    return clean.empty() ? "" : clean;
 }
 
-int main(int argc, const char *argv[]) {
-    // Step 2: Parse command-line arguments
+int main(int argc, const char* argv[]) {
+    // Step 2: Parsear argumentos de línea de comandos
     CommandLineParser parser(argc, argv);
     if (!parser.hasOption("-h")) {
-        cout << "Error: must specify path with -h" << endl;
+        cout << "Error: debe especificar la ruta con -h" << endl;
         return 1;
     }
     string wwwPath = parser.getOption("-h");
     if (wwwPath.empty() || !filesystem::exists(wwwPath) || !filesystem::is_directory(wwwPath)) {
-        cout << "Error: invalid path: " << wwwPath << endl;
+        cout << "Error: ruta inválida: " << wwwPath << endl;
         return 1;
     }
-    cout << "Valid path: " << wwwPath << endl;
+    cout << "Ruta válida: " << wwwPath << endl;
 
-    // Step 3: Open database
-    sqlite3 *db;
-    char *errMsg = nullptr;
-    cout << "Opening database..." << endl;
+    // Step 3: Abrir base de datos
+    sqlite3* db;
+    char* errMsg = nullptr;
+    cout << "Abriendo base de datos..." << endl;
     if (sqlite3_open("index.db", &db) != SQLITE_OK) {
-        cout << "Error: cannot open database: " << sqlite3_errmsg(db) << endl;
+        cout << "Error: no se puede abrir la base de datos: " << sqlite3_errmsg(db) << endl;
         sqlite3_close(db);
         return 1;
     }
-    cout << "Database opened successfully" << endl;
+    cout << "Base de datos abierta correctamente" << endl;
 
-    // Step 4: Create tables
-    cout << "Creating tables..." << endl;
-    if (sqlite3_exec(db, "BEGIN; "
-                         "DROP TABLE IF EXISTS word_document; "
-                         "DROP TABLE IF EXISTS words; "
-                         "DROP TABLE IF EXISTS documents; "
-                         "CREATE TABLE documents (doc_id INTEGER PRIMARY KEY, path VARCHAR NOT NULL); "
-                         "CREATE TABLE words (word_id INTEGER PRIMARY KEY, word VARCHAR NOT NULL UNIQUE); "
-                         "CREATE TABLE word_document (word_id INTEGER, doc_id INTEGER, "
-                         "PRIMARY KEY (word_id, doc_id), FOREIGN KEY (word_id) REFERENCES words(word_id), "
-                         "FOREIGN KEY (doc_id) REFERENCES documents(doc_id)); "
-                         "CREATE INDEX idx_word ON words(word); "
-                         "COMMIT;", nullptr, 0, &errMsg) != SQLITE_OK) {
-        cout << "Error: failed to create tables: " << errMsg << endl;
+    // Step 4: Crear tabla virtual FTS5
+    cout << "Creando tabla FTS5..." << endl;
+    if (sqlite3_exec(db, "CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(path, content, tokenize='unicode61');",
+        nullptr, 0, &errMsg) != SQLITE_OK) {
+        cout << "Error: no se pudo crear la tabla FTS5: " << errMsg << endl;
         sqlite3_free(errMsg);
         sqlite3_close(db);
         return 1;
     }
-    cout << "Tables created successfully" << endl;
+    cout << "Tabla FTS5 creada correctamente" << endl;
 
-    // Step 5: Process HTML files
-    cout << "Processing HTML files..." << endl;
+    // Step 5: Procesar archivos HTML
+    cout << "Procesando archivos HTML..." << endl;
     string wikiPath = (filesystem::path(wwwPath) / "wiki").string();
     if (!filesystem::exists(wikiPath)) {
-        cout << "Error: wiki directory does not exist: " << wikiPath << endl;
+        cout << "Error: el directorio wiki no existe: " << wikiPath << endl;
         sqlite3_close(db);
         return 1;
     }
 
-    // Step 6: Save to database
-    cout << "Indexing files..." << endl;
-    sqlite3_stmt *insertDoc, *insertWord, *selectWord, *insertWordDoc;
-    if (sqlite3_prepare_v2(db, "INSERT INTO documents (path) VALUES (?);", -1, &insertDoc, nullptr) != SQLITE_OK ||
-        sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO words (word) VALUES (?);", -1, &insertWord, nullptr) != SQLITE_OK ||
-        sqlite3_prepare_v2(db, "SELECT word_id FROM words WHERE word = ?;", -1, &selectWord, nullptr) != SQLITE_OK ||
-        sqlite3_prepare_v2(db, "INSERT INTO word_document (word_id, doc_id) VALUES (?, ?);", -1, &insertWordDoc, nullptr) != SQLITE_OK) {
-        cout << "Error: failed to prepare statements: " << sqlite3_errmsg(db) << endl;
+    // Step 6: Guardar en la base de datos
+    cout << "Indexando archivos..." << endl;
+    sqlite3_stmt* insertDoc;
+    if (sqlite3_prepare_v2(db, "INSERT INTO search_index (path, content) VALUES (?, ?);", -1, &insertDoc, nullptr) != SQLITE_OK) {
+        cout << "Error: no se pudo preparar la consulta: " << sqlite3_errmsg(db) << endl;
         sqlite3_close(db);
         return 1;
     }
@@ -122,7 +128,7 @@ int main(int argc, const char *argv[]) {
 
         ifstream file(entry.path());
         if (!file.is_open()) {
-            cout << "Warning: cannot open file: " << entry.path().string() << endl;
+            cout << "Advertencia: no se puede abrir el archivo: " << entry.path().string() << endl;
             continue;
         }
         stringstream buffer;
@@ -130,81 +136,47 @@ int main(int argc, const char *argv[]) {
         string content = buffer.str();
         file.close();
 
-        set<string> words = extractWords(content);
-        if (words.empty()) {
-            cout << "Warning: no valid words in: " << entry.path().string() << endl;
+        string cleanText = extractCleanText(content);
+        if (cleanText.empty()) {
+            cout << "Advertencia: no hay texto válido en: " << entry.path().string() << endl;
             continue;
         }
 
         if (sqlite3_exec(db, "BEGIN;", nullptr, 0, &errMsg) != SQLITE_OK) {
-            cout << "Error: failed to begin transaction: " << errMsg << endl;
+            cout << "Error: no se pudo iniciar la transacción: " << errMsg << endl;
             sqlite3_free(errMsg);
             continue;
         }
 
         string relPath = filesystem::relative(entry.path(), wwwPath).string();
         if (sqlite3_bind_text(insertDoc, 1, relPath.c_str(), -1, SQLITE_STATIC) != SQLITE_OK ||
+            sqlite3_bind_text(insertDoc, 2, cleanText.c_str(), -1, SQLITE_STATIC) != SQLITE_OK ||
             sqlite3_step(insertDoc) != SQLITE_DONE) {
-            cout << "Error: failed to insert document: " << sqlite3_errmsg(db) << endl;
+            cout << "Error: no se pudo insertar el documento: " << sqlite3_errmsg(db) << endl;
             sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
             sqlite3_reset(insertDoc);
             continue;
         }
-        sqlite_int64 docId = sqlite3_last_insert_rowid(db);
         sqlite3_reset(insertDoc);
 
-        for (const string& word : words) {
-            if (sqlite3_bind_text(insertWord, 1, word.c_str(), -1, SQLITE_STATIC) != SQLITE_OK ||
-                sqlite3_step(insertWord) != SQLITE_DONE ||
-                sqlite3_bind_text(selectWord, 1, word.c_str(), -1, SQLITE_STATIC) != SQLITE_OK) {
-                cout << "Error: failed to process word: " << sqlite3_errmsg(db) << endl;
-                sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
-                break;
-            }
-            sqlite3_reset(insertWord);
-
-            sqlite_int64 wordId = -1;
-            if (sqlite3_step(selectWord) == SQLITE_ROW) {
-                wordId = sqlite3_column_int64(selectWord, 0);
-            }
-            sqlite3_reset(selectWord);
-            if (wordId == -1) {
-                cout << "Error: cannot retrieve word_id for: " << word << endl;
-                sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
-                break;
-            }
-
-            if (sqlite3_bind_int64(insertWordDoc, 1, wordId) != SQLITE_OK ||
-                sqlite3_bind_int64(insertWordDoc, 2, docId) != SQLITE_OK ||
-                sqlite3_step(insertWordDoc) != SQLITE_DONE) {
-                cout << "Error: failed to insert word_document: " << sqlite3_errmsg(db) << endl;
-                sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
-                break;
-            }
-            sqlite3_reset(insertWordDoc);
-        }
-
         if (sqlite3_exec(db, "COMMIT;", nullptr, 0, &errMsg) != SQLITE_OK) {
-            cout << "Error: failed to commit transaction: " << errMsg << endl;
+            cout << "Error: no se pudo confirmar la transacción: " << errMsg << endl;
             sqlite3_free(errMsg);
             sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
             continue;
         }
     }
 
-    // Step 7: Finalize and close database
-    cout << "Finalizing statements..." << endl;
+    // Step 7: Finalizar y cerrar base de datos
+    cout << "Finalizando consultas..." << endl;
     sqlite3_finalize(insertDoc);
-    sqlite3_finalize(insertWord);
-    sqlite3_finalize(selectWord);
-    sqlite3_finalize(insertWordDoc);
 
-    cout << "Closing database..." << endl;
+    cout << "Cerrando base de datos..." << endl;
     if (sqlite3_close(db) != SQLITE_OK) {
-        cout << "Error: failed to close database: " << sqlite3_errmsg(db) << endl;
+        cout << "Error: no se pudo cerrar la base de datos: " << sqlite3_errmsg(db) << endl;
         return 1;
     }
-    cout << "Database closed successfully" << endl;
+    cout << "Base de datos cerrada correctamente" << endl;
 
     return 0;
 }
