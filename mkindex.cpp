@@ -21,6 +21,7 @@
 
 using namespace std;
 
+
 static int onDatabaseEntry(void* userdata, int argc, char** argv, char** azColName) {
     cout << "--- Entry" << endl;
     for (int i = 0; i < argc; i++) {
@@ -30,9 +31,11 @@ static int onDatabaseEntry(void* userdata, int argc, char** argv, char** azColNa
 }
 
 // Extract clean text from HTML content
-string extractCleanText(const string& content)
-{
+string extractCleanText(const string& content) {
+    // Remove HTML tags, comments, and scripts
     string clean = regex_replace(content, regex("<!--.*?-->|<script.*?</script>|</?[^>]+>", regex::icase), "");
+
+    // Convert to lowercase
     transform(clean.begin(), clean.end(), clean.begin(), ::tolower);
 
     // Remove punctuation and normalize spaces
@@ -45,8 +48,7 @@ string extractCleanText(const string& content)
     return clean;
 }
 
-int main(int argc, const char* argv[]) 
-{
+int main(int argc, const char* argv[]) {
     // Step 1: Parse command-line arguments
     CommandLineParser parser(argc, argv);
     if (!parser.hasOption("-h")) {
@@ -142,41 +144,6 @@ int main(int argc, const char* argv[])
             sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
             continue;
         }
-    }
-
-    // Step 6: Search in FTS5 table (example query)
-    cout << "Performing example search..." << endl;
-    string searchTerm = "evolucion"; // Example term for testing
-    string query = "SELECT path FROM search_index WHERE content MATCH ?;";
-    sqlite3_stmt* searchStmt;
-    if (sqlite3_prepare_v2(db, query.c_str(), -1, &searchStmt, nullptr) != SQLITE_OK) {
-        cout << "Error: failed to prepare search statement: " << sqlite3_errmsg(db) << endl;
-        sqlite3_finalize(insertDoc);
-        sqlite3_close(db);
-        return 1;
-    }
-
-    if (sqlite3_bind_text(searchStmt, 1, searchTerm.c_str(), -1, SQLITE_STATIC) != SQLITE_OK ||
-        sqlite3_exec(db, "BEGIN;", nullptr, 0, &errMsg) != SQLITE_OK) {
-        cout << "Error: failed to initiate search: " << (errMsg ? errMsg : sqlite3_errmsg(db)) << endl;
-        sqlite3_free(errMsg);
-        sqlite3_finalize(searchStmt);
-        sqlite3_finalize(insertDoc);
-        sqlite3_close(db);
-        return 1;
-    }
-
-    cout << "Search results for '" << searchTerm << "':" << endl;
-    while (sqlite3_step(searchStmt) == SQLITE_ROW) {
-        const char* path = reinterpret_cast<const char*>(sqlite3_column_text(searchStmt, 0));
-        cout << "Found in: " << (path ? path : "NULL") << endl;
-    }
-    sqlite3_finalize(searchStmt);
-
-    if (sqlite3_exec(db, "COMMIT;", nullptr, 0, &errMsg) != SQLITE_OK) {
-        cout << "Error: failed to commit search transaction: " << errMsg << endl;
-        sqlite3_free(errMsg);
-        sqlite3_exec(db, "ROLLBACK;", nullptr, 0, nullptr);
     }
 
     // Step 7: Finalize and close database
