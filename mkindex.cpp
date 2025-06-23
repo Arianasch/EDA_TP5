@@ -146,7 +146,7 @@ int main(int argc, const char* argv[]) {
         }
     }
 
-    // Step 7: Finalize and close database
+    // Step 6: Finalize and close database
     cout << "Finalizing statements..." << endl;
     sqlite3_finalize(insertDoc);
 
