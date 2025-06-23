@@ -9,7 +9,8 @@ Modificaciones realizadas sobre mkindex.cpp (optamos por describir brevemente en
 como organizamos el codigo.
 
 
--Paso 1: parsear la ruta de la carpeta
+-Paso 1: parsear la ruta de la carpeta.
+
 Lee el argumento -h desde la línea de comandos y verifica que sea una carpeta válida y existente. Esto define dónde buscar los archivos HTML.
  
 1.1)creamos un objeto de CommandLineParser, parser, para leer los argumentos de linea de comandos (es decir, lo que esta luego del nombre del programa:
@@ -25,12 +26,14 @@ en este contexto dicho argumento seria la ruta de la carpeta www).
 
 
 
--Paso 2: abrir la base de datos SQLite (ya estaba hecho)
+-Paso 2: abrir la base de datos SQLite (ya estaba hecho).
+
  Abre (o crea) la base de datos index.db para almacenar el índice de búsqueda.
 
 
 
--Paso 3: Crear tabla virtual con FTS5
+-Paso 3: Crear tabla virtual con FTS5.
+
 Crea una tabla virtual search_index usando el módulo FTS5 de SQLite, con columnas path (ruta del archivo) y content (texto limpio), optimizada para búsquedas de texto completo.
 
   En esta instancia, primero habiamos optado por crear tres tablas: documents (con un ID unico para cada archivo y un path),
@@ -44,15 +47,18 @@ Ademas, el tokenizador que usa FTS5 para dividir el texto en tokens es unicode61
 
 
 
--Paso 4:Procesar archivos HTML
+-Paso 4:Procesar archivos HTML.
+
 Construye la ruta a la carpeta www/wiki y verifica que exista, preparando el programa para recorrer los archivos HTML en el paso siguiente.
 WikiPath es un string que almacena dicha ruta, para construirla se hace uso de la funcion path y se le pasa como argumento la variable con la ruta a la carpeta raiz obtenida del argumento -h (asi lo convierte en un objeto path de la bibilioteca filesystem: un objeto de dicha biblioteca es una herramienta para manejar rutas de forma segura y portátil). Luego, se usa el operador / de filesystem para concatenar el objeto path con la cadena "wiki", formando un nuevo objeto path que representa la ruta ../../www/wiki ("wiki" es el nombre de la subcarpeta dentro de www donde están los archivos HTML que queremos indexar). Finalmente, string() convierte el objeto path resultante de vuelta a un string para almacenarlo en la varible WikiPath.
 
 
 
--Paso 5: Indexar archivos en la base de datos
+-Paso 5: Indexar archivos en la base de datos.
+
 Este paso recorre todos los archivos HTML en la carpeta wikiPath, lee su contenido, lo limpia con extractCleanText, calcula su ruta relativa (para la columna path), y los inserta en la tabla search_index con las columnas path y content. Usa transacciones para asegurar que las inserciones sean consistentes.
 Antes de comenzar, aclaramos conceptos como trasacciones, consultas y declaraciones preparadas en una base de datos.Luego, en el código, usamos transacciones para guardar información de cada archivo HTML (su ruta y texto) en la base de datos. Si algo falla (por ejemplo, no se puede guardar el texto), la transacción se "deshace" para no dejar datos incompletos.
+Primero, se crea una variable llamada insertDoc que será una "plantilla" para guardar datos en la base de datos, esto es lo que se conoce como una declaracion preparada (mas adelante mos referiremos a el como formulario para mayor claridad).
 Es importante mencionar que recorre recursivamente todos los archivos y subcarpetas en wikiPath donde recursive_directory_iterator de filesystem, crea un iterador que recorre todos los archivos y subcarpetas.Pero, por que? Los archivos HTML pueden estar organizados en subcarpetas dentro de wiki, un recorrido no recursivo  omitiría las subcarpetas.Asi, se permite indexar todos los archivos HTML, sin importar cuán profundo estén en la estructura de directorios.
 Tambien, cuando se abre el archivo en modo lectura, se lee todo su contenido en un stringstream (buffer) y luego se convierte el contenido a un string (content).
 
@@ -61,11 +67,17 @@ Dicha funcion hace uso de la libreria regex (elimina comentarios HTML,scripts, e
 Ahora bien, antes habiamos implementado una funcion que lo hacia "a mano", sin usar esta libreria, por ejemplo, eliminaba etiquetas HTML usando un bucle que detectaba < y >. Si bien era simple de entender (recorre el texto carácter por carácter), era propenso a errores: no maneja casos complejos de HTML (como <script>, comentarios <!-- -->) y hacia el codigo largo: requiere varios bucles y condiciones para tareas comunes (quitar etiquetas, normalizar espacios).
 Por otro lado, regex logra lo mismo con menos líneas,maneja casos complejos de HTML y , al ser un estándar en muchos lenguajes, encontramos de gran utlidad aprender a manejarlo.
 
-Finalmnete, calcula la ruta relativa (relPath) respecto a wwwPath, e inserta relPath y cleanText en search_index dentro de una transacción.
+Finalmente, calcula la ruta relativa (relPath) respecto a wwwPath, e inserta relPath y cleanText en search_index dentro de una transacción (usando
+sqlite3_exec para comenzat dicha transacción).
+sqlite3_bind_text llena el "formulario" con la ruta y el texto, y lo guarda en la base de datos.Luego ,sqlite3_reset lo limpia para usarlo con el próximo archivo.
+Ahora si, finalmente, esta linea:
+if (sqlite3_exec(db, "COMMIT;", nullptr, 0, &errMsg) != SQLITE_OK) { ... continue;}
+Confirma la transacción para guardar los datos permanentemente(COMMIT: Guarda los cambios y,si falla, deshace con ROLLBACK y pasa al siguiente).
 
 
 
--Paso 6: finalizar y cerrar la base de datos
+-Paso 6: finalizar y cerrar la base de datos.
+
  Libera la consulta preparada del Paso 5 y cierra la conexión a la base de datos (index.db), asegurando que todos los recursos se liberen correctamente y que los datos indexados queden guardados.
  Asi,finaliza el proceso de indexación limpiamente, dejando la base de datos lista para ser usada y evitando fugas de memoria o conexiones abiertas.
 
