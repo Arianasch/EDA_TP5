@@ -1,22 +1,36 @@
-# EDA_TP5
+# EDA_TP5  
+INTEGRANTES: Sambucetti Juan, Schiaffino Ariana
 
-modificaciones realizadas sobre mkindex.cpp 
+RESUMEN DEL TRABAJO: El proyecto desarrolla un motor de búsqueda para archivos HTML almacenados en la carpeta www/wiki. mkindex.cpp recorre recursivamente esta carpeta, extrae el texto limpio de cada archivo HTML (eliminando etiquetas y puntuación con regex), calcula rutas relativas, y los indexa en una base de datos SQLite (index.db) usando una tabla virtual FTS5 con columnas path y content. HttpRequestHandler.cpp maneja solicitudes HTTP, consulta search_index con FTS5 para encontrar coincidencias, y genera una página HTML con enlaces a los archivos correspondientes.
 
-Paso 1: parsear la ruta de la carpeta
+
+***************************************************************************************************************************************************************
+Modificaciones realizadas sobre mkindex.cpp (optamos por describir brevemente en pasos con el fin de que se mas claro para el lector y, a su vez, para mostrar 
+como organizamos el codigo.
+
+
+-Paso 1: parsear la ruta de la carpeta
 Lee el argumento -h desde la línea de comandos y verifica que sea una carpeta válida y existente. Esto define dónde buscar los archivos HTML.
  
 1.1)creamos un objeto de CommandLineParser, parser, para leer los argumentos de linea de comandos (es decir, lo que esta luego del nombre del programa:
 en este contexto dicho argumento seria la ruta de la carpeta www).
+
 1.2) hasOption verifica si el argumento -h está presente. Retorna true si existe, false si no.
+
 1.3)getOption obtiene el valor asociado con -h como un string.
+
 1.4)exists de <filesystem>, verifica si la ruta wwwPath existe en el sistema de archivos.
+
 1.5)is_directory confirma que wwwPath es una carpeta.
 
 
-Paso 2: abrir la base de datos SQLite (ya estaba hecho)
+
+-Paso 2: abrir la base de datos SQLite (ya estaba hecho)
  Abre (o crea) la base de datos index.db para almacenar el índice de búsqueda.
 
-Paso 3: Crear tabla virtual con FTS5
+
+
+-Paso 3: Crear tabla virtual con FTS5
 Crea una tabla virtual search_index usando el módulo FTS5 de SQLite, con columnas path (ruta del archivo) y content (texto limpio), optimizada para búsquedas de texto completo.
 
   En esta instancia, primero habiamos optado por crear tres tablas: documents (con un ID unico para cada archivo y un path),
@@ -24,108 +38,38 @@ words ( con ID unico para cada palabra y la palabra con UNIQUE para evitar dupli
 Luego, investigando por mejores opciones, encontramos una extensión de SQLite: FTS5, diseñada para buscar texto de manera rápida y eficiente. En lugar de almacenar datos como tablas normales (como hicimos antes), FTS5 crea tablas virtuales que indexan palabras (tokens) automáticamente
 Concluimos que, por un lado, el codigo anterior requiere múltiples tablas, consultas más complejas (para buscar una palabra, uniamos (JOIN) las tablas words y word_document, lo que podria ser más lento con muchos datos) y mantenimiento manual (teniamos que insertar palabras únicas en words y conectarlas con documentos en word_document). Por otro lado, con FTS5 se requiere una sola tabla virtual,tiene un índice automático que mapea palabras a documentos y , finalmente, requiere de mucho menos codigo.
 
-
-Procesar archivos HTML
-Qué hace: Construye la ruta a la carpeta www/wiki y verifica que exista, preparando el programa para recorrer los archivos HTML en el paso siguiente.
-
-5.1. Listar los archivos: Encontrar todos los archivos .html en www/wiki 
-5.2Leer el contenido: Abrir cada archivo y obtener su texto (que incluye etiquetas HTML como <p>, <h1>, etc.).
-5.3Quitar etiquetas HTML: Eliminar manualmente todo lo que esté entre < y > para quedarte con el texto puro.
-5.4Extraer palabras: Dividir el texto limpio en palabras individuales y prepararlas para guardarlas (en minúsculas, sin puntuación).
-
-Paso 5: Indexar archivos en la base de datos
-Qué hace: Recorre los archivos .html en www/wiki, lee su contenido, lo limpia con extractCleanText, y guarda la ruta relativa y el texto limpio en la tabla search_index usando transacciones.
-
-
-funcion extractWordsFromText:Itera sobre el contenido del archivo carácter por carácter.
-Usa inTag para ignorar texto entre < y > (etiquetas HTML).
-Guarda el texto limpio en cleanText.
-Divide cleanText en palabras usando stringstream.
-Para cada palabra:
-La convierte a minúsculas (transform con tolower).
-Elimina puntuación (remove_if con ispunct).
-Ignora palabras cortas (< 3 caracteres).
-Las guarda en un set<string> para evitar duplicados.
+ En el contexto de FTS5, los tokens son las palabras que SQLite indexa para que puedas buscarlas después (FTS5 elimina acentos y convierte a minúsculas internamente para búsquedas, dependiendo del tokenizador).
+ Al tokenizar, SQLite crea un índice interno que asocia cada token (palabra) con los documentos (filas en search_index) donde aparece. Esto hace que buscar una palabra sea rápido, porque SQLite ya sabe en qué filas está esa palabra.
+Ademas, el tokenizador que usa FTS5 para dividir el texto en tokens es unicode61 el cual stá basado en las reglas de Unicode 6.1, que definen cómo identificar palabras en diferentes idiomas, incluyendo caracteres especiales como acentos, la ñ, o caracteres no latinos (ej., kanji).Convierte a minúsculas para búsquedas insensibles a mayúsculas.Ignora puntuación y espacios para enfocarse en palabras.
 
 
 
-
-
-Qué es: Una transacción en una base de datos es como un "paquete" de operaciones que deben hacerse todas juntas o ninguna. Es una forma de asegurarte de que los cambios que hacés en la base de datos (como guardar un archivo) se completen correctamente, o si algo falla, todo se deshace para evitar errores.
-En el código: Usamos transacciones para guardar información de cada archivo HTML (su ruta y texto) en la base de datos. Si algo falla (por ejemplo, no se puede guardar el texto), la transacción se "deshace" (rollback) para no dejar datos incompletos.
-Palabras clave:
-BEGIN;: Empieza la transacción (como decir "empecemos a armar el rompecabezas").
-COMMIT;: Confirma los cambios (como decir "terminé, todo encaja, guardemos el rompecabezas").
-ROLLBACK;: Deshace los cambios si algo falla (como sacar todas las piezas si no encajan).
-Qué es una consulta SQL: SQL es un lenguaje para hablar con bases de datos. Una consulta SQL es como una instrucción que le das a la base de datos, por ejemplo, "guarda este texto" o "busca esta palabra".
-Qué es "compilar una consulta SQL": Compilar una consulta significa tomar una instrucción SQL (como INSERT INTO tabla (columna) VALUES (?);) y prepararla para que la base de datos la entienda y la ejecute rápido varias veces. Es como traducir una receta escrita a un formato que la cocina puede usar una y otra vez sin tener que releer la receta completa.
-Qué es una declaración preparada: Una declaración preparada es como una plantilla de una instrucción SQL que tiene "huecos" (marcados con ?) donde podés poner diferentes valores cada vez que la uses. Por ejemplo:
-Plantilla: INSERT INTO search_index (path, content) VALUES (?, ?);
-Uso: Llenás los ? con valores como "wiki/doc1.html" y "hola mundo".
-Qué hace sqlite3_prepare_v2:
-Toma una consulta SQL (la plantilla) y la convierte en un objeto que SQLite puede ejecutar muchas veces.
-Es más seguro y rápido que ejecutar consultas directamente, especialmente si vas a repetir la misma operación (como guardar muchos archivos).
+-Paso 4:Procesar archivos HTML
+Construye la ruta a la carpeta www/wiki y verifica que exista, preparando el programa para recorrer los archivos HTML en el paso siguiente.
+WikiPath es un string que almacena dicha ruta, para construirla se hace uso de la funcion path y se le pasa como argumento la variable con la ruta a la carpeta raiz obtenida del argumento -h (asi lo convierte en un objeto path de la bibilioteca filesystem: un objeto de dicha biblioteca es una herramienta para manejar rutas de forma segura y portátil). Luego, se usa el operador / de filesystem para concatenar el objeto path con la cadena "wiki", formando un nuevo objeto path que representa la ruta ../../www/wiki ("wiki" es el nombre de la subcarpeta dentro de www donde están los archivos HTML que queremos indexar). Finalmente, string() convierte el objeto path resultante de vuelta a un string para almacenarlo en la varible WikiPath.
 
 
 
+-Paso 5: Indexar archivos en la base de datos
+Este paso recorre todos los archivos HTML en la carpeta wikiPath, lee su contenido, lo limpia con extractCleanText, calcula su ruta relativa (para la columna path), y los inserta en la tabla search_index con las columnas path y content. Usa transacciones para asegurar que las inserciones sean consistentes.
+Antes de comenzar, aclaramos conceptos como trasacciones, consultas y declaraciones preparadas en una base de datos.Luego, en el código, usamos transacciones para guardar información de cada archivo HTML (su ruta y texto) en la base de datos. Si algo falla (por ejemplo, no se puede guardar el texto), la transacción se "deshace" para no dejar datos incompletos.
+Es importante mencionar que recorre recursivamente todos los archivos y subcarpetas en wikiPath donde recursive_directory_iterator de filesystem, crea un iterador que recorre todos los archivos y subcarpetas.Pero, por que? Los archivos HTML pueden estar organizados en subcarpetas dentro de wiki, un recorrido no recursivo  omitiría las subcarpetas.Asi, se permite indexar todos los archivos HTML, sin importar cuán profundo estén en la estructura de directorios.
+Tambien, cuando se abre el archivo en modo lectura, se lee todo su contenido en un stringstream (buffer) y luego se convierte el contenido a un string (content).
 
+Luego, se llama a extractCleanText para procesar el contenido HTML (content) y obtener texto limpio (sin etiquetas, scripts, puntuación, en minúsculas).
+Dicha funcion hace uso de la libreria regex (elimina comentarios HTML,scripts, etiquetas HTML, puntuación ([^a-z\s]),Normaliza espacios y convierte el texto a minúsculas.
+Ahora bien, antes habiamos implementado una funcion que lo hacia "a mano", sin usar esta libreria, por ejemplo, eliminaba etiquetas HTML usando un bucle que detectaba < y >. Si bien era simple de entender (recorre el texto carácter por carácter), era propenso a errores: no maneja casos complejos de HTML (como <script>, comentarios <!-- -->) y hacia el codigo largo: requiere varios bucles y condiciones para tareas comunes (quitar etiquetas, normalizar espacios).
+Por otro lado, regex logra lo mismo con menos líneas,maneja casos complejos de HTML y , al ser un estándar en muchos lenguajes, encontramos de gran utlidad aprender a manejarlo.
 
- cambios:
- std::string extractCleanText(const std::string& content) {
-    std::string cleanText;
-    bool inTag = false;
-
-    // Remover etiquetas HTML
-    for (char c : content) {
-        if (c == '<') inTag = true;
-        else if (c == '>') inTag = false;
-        else if (!inTag) cleanText += tolower(c);
-    }
-
-    // Remover puntuación y normalizar espacios
-    std::string result;
-    bool lastWasSpace = true;
-    for (char c : cleanText) {
-        if (ispunct(c)) continue;
-        if (isspace(c)) {
-            if (!lastWasSpace) result += ' ';
-            lastWasSpace = true;
-        } else {
-            result += c;
-            lastWasSpace = false;
-        }
-    }
-    // Remover espacio final
-    if (!result.empty() && result.back() == ' ') result.pop_back();
-    return result;
-}Qué hace:
-
-Quita etiquetas HTML (como <p> o </div>) usando un bucle que detecta < y >.
-Convierte el texto a minúsculas con tolower.
-Elimina puntuación con ispunct y normaliza espacios (evita múltiples espacios seguidos).
-Devuelve una cadena limpia (por ejemplo, <p>Hola, mundo!</p> se convierte en "hola mundo").
-Ventajas del enfoque actual:
-
-Simple de entender: Recorre el texto carácter por carácter, lo que es claro si estás empezando.
-Control total: Vos decidís exactamente qué caracteres quitar o mantener.
-Eficiente: Para textos pequeños o medianos, este bucle es rápido porque no usa bibliotecas adicionales.
-Desventajas:
-
-Propenso a errores: No maneja casos complejos de HTML (como <script>, comentarios <!-- -->, o atributos como <p class="test">).
-Código largo: Requiere varios bucles y condiciones para tareas comunes (quitar etiquetas, normalizar espacios).
-Mantenimiento difícil: Si querés cambiar cómo se limpian las palabras (por ejemplo, aceptar guiones), tenés que modificar el bucle manualmente.
-
-Ventajas de regex:
-
-Código más corto: Logra lo mismo con menos líneas, ya que regex reemplaza bucles complejos.
-Flexible: Podés cambiar los patrones fácilmente para manejar casos nuevos (por ejemplo, aceptar números con [a-z0-9]).
-Robusto: Maneja casos complejos de HTML (como <br/> o <!-- comentarios -->) con patrones bien definidos.
-Estándar: Regex es un estándar en muchos lenguajes, por lo que aprendés una habilidad reutilizable.
+Finalmnete, calcula la ruta relativa (relPath) respecto a wwwPath, e inserta relPath y cleanText en search_index dentro de una transacción.
 
 
 
+-Paso 6: finalizar y cerrar la base de datos
+ Libera la consulta preparada del Paso 5 y cierra la conexión a la base de datos (index.db), asegurando que todos los recursos se liberen correctamente y que los datos indexados queden guardados.
+ Asi,finaliza el proceso de indexación limpiamente, dejando la base de datos lista para ser usada y evitando fugas de memoria o conexiones abiertas.
 
-
+*********************************************************************************************************************************************************************
 
 ##BUSCADOR
 En la parte del buscador, lo primero que se hace es tokenizar la búsqueda del usuario. esto es, se separa todo el string de búsqueda en palabras individuales. Si el usuario buscó "100 metros", guardaremos "100" y "metros". 
